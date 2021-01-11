@@ -32,6 +32,7 @@ enum TTaskState
 	TaskStateSleeping,
 	TaskStateTerminated,
 	TaskStateNew,
+	TaskStateBlockedWithTimeout,
 	TaskStateUnknown
 };
 
@@ -53,7 +54,8 @@ public:
 
 #define TASK_USER_DATA_KTHREAD		0	// Linux driver emulation
 #define TASK_USER_DATA_ERROR_STACK	1	// Plan 9 driver emulation
-#define TASK_USER_DATA_SLOTS		2
+#define TASK_USER_DATA_USER			2	// circle program use
+#define TASK_USER_DATA_SLOTS		3
 	void SetUserData (void *pData, unsigned nSlot);
 	void *GetUserData (unsigned nSlot);
 

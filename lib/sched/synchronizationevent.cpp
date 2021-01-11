@@ -71,8 +71,26 @@ void CSynchronizationEvent::Wait (void)
 	if (!m_bState)
 	{
 		assert (m_pWaitTask == 0);
-		CScheduler::Get ()->BlockTask (&m_pWaitTask);
+		CScheduler::Get ()->BlockTask (&m_pWaitTask, 0);
 
 		assert (m_bState);
 	}
 }
+
+// Wait for this event to be signalled, or a time period to elapse
+// Returns true if timed out. Caller should check event state
+// to determine if it's been signalled.
+// Note, could be both signalled and timed out
+bool CSynchronizationEvent::WaitWithTimeout (unsigned nMicroSeconds)
+{
+	if (m_bState)
+	{
+		return nMicroSeconds == 0;
+	}
+	else
+	{
+		assert(m_pWaitTask == 0);
+		return CScheduler::Get ()->BlockTask (&m_pWaitTask, true);
+	}
+}
+
