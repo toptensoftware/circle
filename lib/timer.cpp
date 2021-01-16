@@ -233,6 +233,31 @@ unsigned CTimer::GetClockTicks (void)
 #endif
 }
 
+
+static unsigned g_nLastClocksTicksLo = 0;
+static unsigned g_nClockTicksHi = 0;
+static CSpinLock g_Ticks64SpinLock;
+
+u64 CTimer::GetClockTicks64()
+{
+	g_Ticks64SpinLock.Acquire();
+
+	// Detect the 1Mhz clock tick counter wrapping which occurs
+	// every 4294 seconds, or 71 minutes (approx).
+	// To ensure we don't miss it, InterruptHandler calls this 
+	// method every 30 minutes
+	unsigned ticks = GetClockTicks();
+	if (ticks < g_nLastClocksTicksLo)
+	{
+		g_nLastClocksTicksLo = ticks;
+		g_nClockTicksHi++;
+	}
+
+	g_Ticks64SpinLock.Release();
+	
+	return (((u64)g_nClockTicksHi) << 32) | ticks;
+}
+
 unsigned CTimer::GetTicks (void) const
 {
 	return m_nTicks;
@@ -529,6 +554,14 @@ void CTimer::InterruptHandler (void)
 	{
 		m_nUptime++;
 		m_nTime++;
+
+		// Call GetClockTicks64 every 30 minutes to 
+		// make sure we don't miss the 1Mhz counter
+		// wrapping
+		if (m_nUptime % (30 * 60))
+		{
+			GetClockTicks64();
+		}
 	}
 
 	m_TimeSpinLock.Release ();

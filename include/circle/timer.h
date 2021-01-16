@@ -61,6 +61,9 @@ public:
 	static unsigned GetClockTicks (void);
 #define CLOCKHZ	1000000
 
+	/// \return Current clock ticks of an 1 MHz counter
+	static u64 GetClockTicks64 (void);
+
 	/// \return 1/HZ seconds since system boot, may wrap
 	unsigned GetTicks (void) const;
 	/// \return Seconds since system boot (continous)
