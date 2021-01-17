@@ -284,7 +284,6 @@ async function flashDevice()
             resolveDeviceReady = resolve;
         });
         port.removeAllListeners('data');
-        clearTimeout(timeout);
     }
 
     // Copy to device
