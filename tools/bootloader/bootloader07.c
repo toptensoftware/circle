@@ -30,6 +30,71 @@ extern unsigned int timer_tick ( void );
 extern void timer_init ( void );
 extern unsigned int timer_tick ( void );
 
+int fast_state;
+int fast_bytes_recv;
+int fast_bytes_done;
+unsigned char fast_byte_buffer[256];
+
+// Convert a byte value to a hex nibble character
+char to_nibble(int val)
+{
+    val = (val & 0x0f) + 0x30;
+    if (val > 0x39)
+        val += 7;
+    return val;
+}
+
+// Helper to decode the fast flash format. This just watches for the binary
+// chunks and reformats them back to hex to for main routine.
+unsigned int uart_recv2 ( void )
+{
+    unsigned int ra;
+    if (fast_state == 0)
+    {
+        ra = uart_recv();
+        if (ra == '=')
+        {
+            // Switch to binary mode
+            fast_bytes_recv = uart_recv();
+            fast_bytes_done = 0;
+
+            // Receive the bytes
+            for (int i=0; i<fast_bytes_recv; i++)
+            {
+                fast_byte_buffer[i] = uart_recv();
+            }
+
+            // Next byte must be a CR/LF
+            ra = uart_recv();
+            if (ra != '\r' && ra != '\n')
+                return 'r'; // Something bad happened, reset
+
+            fast_state = 1;
+            return ':';
+        }
+        else
+        {
+            return ra;
+        }
+    }
+    else if (fast_state == 1)
+    {
+        ra = (fast_byte_buffer[fast_bytes_done] >> 4) & 0x0f;
+        fast_state = 2;
+    }
+    else
+    {
+        ra = fast_byte_buffer[fast_bytes_done] & 0x0f;
+        fast_bytes_done++;
+        fast_state = (fast_bytes_done == fast_bytes_recv) ? 0 : 1;
+    }
+
+    // Regenerate hex nibble
+    ra += 0x30;
+    if (ra > 0x39) ra+=7;
+    return ra;
+}
+
 //------------------------------------------------------------------------
 int notmain ( void )
 {
@@ -43,6 +108,8 @@ int notmain ( void )
     unsigned int sum;
     unsigned int ra;
 
+    fast_state = 0;
+
     uart_init();
 
 restart:
@@ -53,6 +120,8 @@ restart:
     uart_send('H');
     uart_send('E');
     uart_send('X');
+    uart_send('-');     // Indicates to flasher tool that fast transfer supported
+    uart_send('F');
     uart_send(0x0D);
     uart_send(0x0A);
 
@@ -65,18 +134,13 @@ restart:
     byte_count=0;
     while(1)
     {
-        ra=uart_recv();
+        ra=uart_recv2();
         if(ra==':')
         {
             state=1;
             continue;
         }
-        if(ra==0x0D)
-        {
-            state=0;
-            continue;
-        }
-        if(ra==0x0A)
+        if(ra==0x0D || ra==0x0A || ra==0x00)
         {
             state=0;
             continue;
@@ -89,6 +153,8 @@ restart:
             uart_send(0x0D);
             uart_send(0x0A);
             uart_send(0x0A);
+            // Small delay to let the response ack be sent
+        	for (volatile unsigned i = 0; i < 10000; i++);
 #if AARCH == 32
             BRANCHTO(0x8000);
 #else

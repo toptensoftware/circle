@@ -19,12 +19,14 @@ let nogoSwitch = false;
 let rebootMagic = null;
 let rebootDelay = null;
 let monitor = false;
+let noFast = false;
 
 // The currently open serial port
 let port;
 
 // The serial port module (delayed load)
 let SerialPort;
+let fastMode = false;
 
 // Open the serial port at specified baud rate, closing and reopening
 // if currently open at a different rate
@@ -117,6 +119,97 @@ async function writeSerialPortAsync(data)
 };
 
 
+// The fast flash write works by switching to binary mode for seqeuences
+// of hex digit pairs that appear immediately after a ':' (99.9% typical case)
+// The send format is to instead an '=' to indicate binary line, followed
+// by a length byte, followed by the binary data
+// 
+// eg: ":0011223344" becomes '=' 0x05 0x00 0x11 0x22 0x33 0x44
+
+let fast_write_buffer = Buffer.alloc(4096);
+let fast_write_buffer_used = 0;
+let fast_unsent_nibble = -1;
+let fast_unsent_byte_count = 0;
+
+// Flush the fast flash buffer
+async function flush_fast_write()
+{
+    if (fast_write_buffer_used)
+    {
+        await writeSerialPortAsync(fast_write_buffer.subarray(0, fast_write_buffer_used));
+        fast_write_buffer_used = 0;
+    }
+}
+
+// Write a byte to the fast flash buffer
+async function fast_write(inbyte)
+{
+    // Convert the incoming character to a hex nibble
+    let nibble = -1;
+    if (inbyte >= 0x30 && inbyte <= 0x39)
+        nibble = inbyte - 0x30;
+    else if (inbyte >= 0x41 && inbyte <= 0x46)
+        nibble = inbyte - 0x41 + 0xA;
+    else if (inbyte >= 0x61 && inbyte <= 0x66)
+        nibble = inbyte - 0x61 + 0xA;
+
+    // Can only switch to binary if we can replace the ':' with '='.  Check we just wrote that...
+    if (fast_unsent_byte_count == 0 && (fast_write_buffer_used == 0 || fast_write_buffer[fast_write_buffer_used-1] != 0x3A))
+    {
+        nibble = -1;
+    }
+
+    // If it wasn't a hex digit, then revert to text mode
+    if (nibble == -1)
+    {
+        // Odd number of nibbles.  Oh no!
+        if (fast_unsent_nibble >= 0)
+            fail(".hex file not compatible with fast mode- odd number of consecutive hex digits")
+
+        // Back fill the binary length
+        if (fast_unsent_byte_count)
+        {
+            fast_write_buffer[fast_write_buffer_used - fast_unsent_byte_count - 1] = fast_unsent_byte_count;
+            fast_unsent_byte_count = 0;
+        }
+
+        // Write non-hex bytes
+        fast_write_buffer[fast_write_buffer_used++] = inbyte;
+
+        // Flush the buffer if it's getting fullish
+        if (fast_write_buffer_used > 2048)
+        {
+            await flush_fast_write();
+        }
+        return;
+    }
+
+    // If this is the first nibble, store it until we get the second.
+    if (fast_unsent_nibble == -1)
+    {
+        // Just store it for now
+        fast_unsent_nibble = nibble;
+        return;
+    }
+
+    // If this is the first complete byte in the sequence, then change the ":"
+    // to "=" and reserve room to back fill the length later.
+    if (fast_unsent_byte_count == 0)
+    {
+        // Switch to "=""            
+        fast_write_buffer[fast_write_buffer_used-1] = 0x3D;
+
+        // Reserve room
+        fast_write_buffer_used++;
+    }
+
+    // Append the binary byte to the buffer
+     fast_write_buffer[fast_write_buffer_used++] = ((fast_unsent_nibble << 4) | nibble);
+    fast_unsent_nibble = -1;
+    fast_unsent_byte_count++;
+}
+
+
 // Send the reboot magic string
 async function sendRebootMagic()
 {   
@@ -143,44 +236,62 @@ async function flashDevice()
     // Open serial port
     await openSerialPortAsync(flashBaud);
 
-    // Open the hex file
-    let fd = fs.openSync(hexFile, `r`);    
-    let buf = Buffer.alloc(4096);
-    let stat = fs.fstatSync(fd);
-
     // Wait for `IHEX` from device as ack it's ready
     if (waitForAck)
     {
         // Send a reset command 
         // (requires the newest version of the booloader kernal)
         stdout.write(`Sending reset command...`);
-        await writeSerialPortAsync('R');
-        stdout.write(`ok\n`);
-
-        stdout.write(`Waiting for device...`);
 
         // Setup receive listener
         let resolveDeviceReady;
         port.on('data', function(data) {
 
-            if (data.toString(`utf8`).includes(`IHEX`))
+            let str = data.toString(`utf8`);
+            if (str.includes(`IHEX`))
             {
                 stdout.write(`ok\n`);
+
+                if (!noFast)
+                {
+                    // If the device responds with IHEX-F it's got
+                    // the fast bootloader so switch to that mode unless
+                    // disabled by command line switch
+                    if (str.includes(`IHEX-F`))
+                    {
+                        stdout.write("Fast mode enabled\n");
+                        fastMode = true;
+                    }
+                }
+
                 if (resolveDeviceReady)
                     resolveDeviceReady();
             }
 
         });
 
+        // Send reset command
+        let resetBuf = Buffer.allocUnsafe(257);
+        resetBuf[257] = 'R'.charCodeAt(0);
+        await writeSerialPortAsync(resetBuf);
+
+        // Set the reset
+        stdout.write(`ok\n`);
+        stdout.write(`Waiting for device...`);
+
         // Wait for it
         await new Promise((resolve, reject) => {
             resolveDeviceReady = resolve;
         });
         port.removeAllListeners('data');
+        clearTimeout(timeout);
     }
 
     // Copy to device
-    stdout.write(`Sending ${stat.size} bytes`);
+    let startTime = new Date().getTime();
+    stdout.write(`Sending`);
+    let fd = fs.openSync(hexFile, `r`);    
+    let buf = Buffer.alloc(4096);
     while (true)
     {
         // Read from hex file
@@ -188,13 +299,36 @@ async function flashDevice()
         if (bytesRead == 0)
             break;
 
-        // Write to serial port
-        await writeSerialPortAsync(buf.subarray(0, bytesRead));
+        if (fastMode)
+        {
+            // In fast mode, push each byte through the fast
+            // flash state machine
+            for (let i=0; i<bytesRead; i++)
+            {
+                await fast_write(buf[i]);
+            }
+        }
+        else
+        {
+            // Write directly to serial port
+            await writeSerialPortAsync(buf.subarray(0, bytesRead));
+        }
         stdout.write(`.`);
+    }
+    fs.closeSync(fd);
+
+    // Flush the fast flash buffer
+    if (fastMode)
+    {
+        flush_fast_write();
     }
 
     // Done
     stdout.write(`ok\n`);
+
+    // Log time
+    let elapsedTime = new Date().getTime() - startTime;
+    stdout.write(`Finished in ${((elapsedTime / 1000).toFixed(1))} seconds.\n`);
 }
 
 
@@ -206,7 +340,6 @@ async function sendGoCommand()
 
     // Send it
     stdout.write(`Sending go command...`)
-    await writeSerialPortAsync('g');
 
     // Wait until we receive `--` indicating device received the go command
     if (waitForAck)
@@ -215,13 +348,17 @@ async function sendGoCommand()
         let resolveAck;
         port.on('data', function(data) {
 
-            if (data.toString(`utf8`).includes(`\r--\r\n\n`))
+            let str = data.toString(`utf8`);
+            if (str.includes(`\r--\r\n\n`))
             {
                 stdout.write(`ok\n`);
                 resolveAck();
             }
 
         });
+
+        // Send command
+        await writeSerialPortAsync('g');
 
         // Wait for it
         await new Promise((resolve, reject) => {
@@ -231,6 +368,7 @@ async function sendGoCommand()
     }
     else
     {
+        await writeSerialPortAsync('g');
         stdout.write(`ok\n`);
     }
 }
@@ -272,6 +410,8 @@ function showHelp()
     console.log(`--flashbaud:<N>    Baud rate for flashing (default=115200)`);
     console.log(`--userbaud:<N>     Baud rate for monitor and reboot magic (default=115200)`);
     console.log(`--noack            Send without checking if device is ready`);
+    console.log(`--fast             Force fast mode flash`);
+    console.log(`--nofast           Disable fast mode`);
     console.log(`--nogo             Don't send the go command after flashing`);
     console.log(`--go               Send the go command, even if not flashing`);
     console.log(`--reboot:<magic>   Sends a magic reboot string at user baud before flashing`);
@@ -335,6 +475,14 @@ function parseCommandLine()
 
                 case `userbaud`:
                     userBaud = Number(value);
+                    break;
+
+                case `fast`:
+                    fastMode = true;
+                    break;
+
+                case `nofast`:
+                    noFast = true;
                     break;
 
                 default:
