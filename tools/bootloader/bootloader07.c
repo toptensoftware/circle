@@ -55,21 +55,25 @@ unsigned int uart_recv2 ( void )
         ra = uart_recv();
         if (ra == '=')
         {
-            // Switch to binary mode
+            // Start binary chunk...
+
+            // Receive the whole chunk before regenerating the hex
             fast_bytes_recv = uart_recv();
             fast_bytes_done = 0;
-
-            // Receive the bytes
             for (int i=0; i<fast_bytes_recv; i++)
             {
                 fast_byte_buffer[i] = uart_recv();
             }
 
-            // Next byte must be a CR/LF or ctrl+z
+            // Next byte must be a CR, LF or Ctrl+Z
             fast_pending_byte = uart_recv();
             if (fast_pending_byte != '\r' && fast_pending_byte != '\n' && fast_pending_byte != 26)
-                return 'r'; // Something bad happened, reset
+            {
+                // Something bad happened, force a reset
+                return 'R'; 
+            }
 
+            // Start hex generation
             fast_state = 1;
             return ':';
         }
@@ -80,17 +84,21 @@ unsigned int uart_recv2 ( void )
     }
     else if (fast_state == 1)
     {
+        // Return first nibble of current byte
         ra = (fast_byte_buffer[fast_bytes_done] >> 4) & 0x0f;
         fast_state = 2;
     }
     else if (fast_state == 2)
     {
+        // Return second nibble of current byte
         ra = fast_byte_buffer[fast_bytes_done] & 0x0f;
+
+        // Move to next byte, or switch out of binary mode
         fast_bytes_done++;
         if (fast_bytes_done == fast_bytes_recv)
         {
             if (fast_pending_byte == 26)
-                fast_state = 1;
+                fast_state = 0;
             else
                 fast_state = 3;
         }
@@ -101,6 +109,7 @@ unsigned int uart_recv2 ( void )
     }
     else
     {
+        // Return the terminating CR or LF
         fast_state = 0;
         return fast_pending_byte;
     }
@@ -116,7 +125,7 @@ int notmain ( void )
 {
     unsigned int state;
     unsigned int byte_count;
-    unsigned int digits_read = 0;
+    unsigned int digits_read;
     unsigned int address;
     unsigned int record_type;
     unsigned int segment;
@@ -128,9 +137,18 @@ int notmain ( void )
 
     uart_init();
 
-restart:
     hexstring(0x12345678);
     hexstring(GETPC());
+
+restart:
+    state=0;
+    byte_count=0;
+    digits_read=0;
+    address=0;
+    record_type=0;
+    segment=0;
+    data=0;
+    sum=0;
 
     uart_send('I');
     uart_send('H');
@@ -141,13 +159,6 @@ restart:
     uart_send(0x0D);
     uart_send(0x0A);
 
-    state=0;
-    segment=0;
-    sum=0;
-    data=0;
-    record_type=0;
-    address=0;
-    byte_count=0;
     while(1)
     {
         ra=uart_recv2();

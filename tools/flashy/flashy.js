@@ -173,6 +173,13 @@ async function fast_write(inbyte)
             fast_unsent_byte_count = 0;
         }
 
+        // Binary data must be terminated with a CR, LF of Ctrl+Z.  Insert a Ctrl+Z if necessary
+        // (Not the typical case)
+        if (inbyte != 0x13 && inbyte != 0x10)
+        {
+            fast_write_buffer[fast_write_buffer_used++] = inbyte;
+        }
+
         // Write non-hex bytes
         fast_write_buffer[fast_write_buffer_used++] = inbyte;
 
@@ -207,6 +214,10 @@ async function fast_write(inbyte)
      fast_write_buffer[fast_write_buffer_used++] = ((fast_unsent_nibble << 4) | nibble);
     fast_unsent_nibble = -1;
     fast_unsent_byte_count++;
+
+    // Check
+    if (fast_unsent_byte_count > 255)
+        fail(".hex file is incompatible with fast mode, use --nofast switch");
 }
 
 
@@ -235,6 +246,9 @@ async function flashDevice()
 {   
     // Open serial port
     await openSerialPortAsync(flashBaud);
+
+    let resetBuf = Buffer.alloc(257);
+    resetBuf[256] = 'R'.charCodeAt(0);
 
     // Wait for `IHEX` from device as ack it's ready
     if (waitForAck)
@@ -271,8 +285,6 @@ async function flashDevice()
         });
 
         // Send reset command
-        let resetBuf = Buffer.allocUnsafe(257);
-        resetBuf[257] = 'R'.charCodeAt(0);
         await writeSerialPortAsync(resetBuf);
 
         // Set the reset
@@ -284,6 +296,11 @@ async function flashDevice()
             resolveDeviceReady = resolve;
         });
         port.removeAllListeners('data');
+    }
+    else
+    {
+        // Send reset command
+        await writeSerialPortAsync(resetBuf);
     }
 
     // Copy to device
