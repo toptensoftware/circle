@@ -33,6 +33,7 @@ extern unsigned int timer_tick ( void );
 int fast_state;
 int fast_bytes_recv;
 int fast_bytes_done;
+unsigned char fast_pending_byte;
 unsigned char fast_byte_buffer[256];
 
 // Convert a byte value to a hex nibble character
@@ -64,9 +65,9 @@ unsigned int uart_recv2 ( void )
                 fast_byte_buffer[i] = uart_recv();
             }
 
-            // Next byte must be a CR/LF
-            ra = uart_recv();
-            if (ra != '\r' && ra != '\n')
+            // Next byte must be a CR/LF or ctrl+z
+            fast_pending_byte = uart_recv();
+            if (fast_pending_byte != '\r' && fast_pending_byte != '\n' && fast_pending_byte != 26)
                 return 'r'; // Something bad happened, reset
 
             fast_state = 1;
@@ -82,11 +83,26 @@ unsigned int uart_recv2 ( void )
         ra = (fast_byte_buffer[fast_bytes_done] >> 4) & 0x0f;
         fast_state = 2;
     }
-    else
+    else if (fast_state == 2)
     {
         ra = fast_byte_buffer[fast_bytes_done] & 0x0f;
         fast_bytes_done++;
-        fast_state = (fast_bytes_done == fast_bytes_recv) ? 0 : 1;
+        if (fast_bytes_done == fast_bytes_recv)
+        {
+            if (fast_pending_byte == 26)
+                fast_state = 1;
+            else
+                fast_state = 3;
+        }
+        else
+        {
+            fast_state = 1;
+        }
+    }
+    else
+    {
+        fast_state = 0;
+        return fast_pending_byte;
     }
 
     // Regenerate hex nibble
