@@ -182,13 +182,14 @@ async function fast_write(inbyte)
         {
             fast_write_buffer[fast_write_buffer_used - fast_unsent_byte_count - 1] = fast_unsent_byte_count;
             fast_unsent_byte_count = 0;
-        }
 
-        // Binary data must be terminated with a CR, LF of Ctrl+Z.  Insert a Ctrl+Z if necessary
-        // (Not the typical case)
-        if (inbyte != 0x13 && inbyte != 0x10)
-        {
-            fast_write_buffer[fast_write_buffer_used++] = inbyte;
+            // Binary data must be terminated with a CR, LF of Ctrl+Z.  Insert a Ctrl+Z if necessary
+            // (Not the typical case)
+            if (inbyte != 0x0D && inbyte != 0x0A)
+            {
+                fast_write_buffer[fast_write_buffer_used++] = inbyte;
+            }
+
         }
 
         // Write non-hex bytes
@@ -376,6 +377,7 @@ async function sendGoCommand()
         port.on('data', function(data) {
 
             let str = data.toString(`utf8`);
+            stdout.write(str);
             if (str.includes(`\r--\r\n\n`))
             {
                 stdout.write(`ok\n`);

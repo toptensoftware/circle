@@ -31,10 +31,9 @@ extern void timer_init ( void );
 extern unsigned int timer_tick ( void );
 
 int fast_state;
-int fast_bytes_recv;
-int fast_bytes_done;
-unsigned char fast_pending_byte;
-unsigned char fast_byte_buffer[256];
+int fast_bytes_left;
+int fast_byte;
+int fast_block = 0;
 
 // Convert a byte value to a hex nibble character
 char to_nibble(int val)
@@ -58,20 +57,8 @@ unsigned int uart_recv2 ( void )
             // Start binary chunk...
 
             // Receive the whole chunk before regenerating the hex
-            fast_bytes_recv = uart_recv();
-            fast_bytes_done = 0;
-            for (int i=0; i<fast_bytes_recv; i++)
-            {
-                fast_byte_buffer[i] = uart_recv();
-            }
-
-            // Next byte must be a CR, LF or Ctrl+Z
-            fast_pending_byte = uart_recv();
-            if (fast_pending_byte != '\r' && fast_pending_byte != '\n' && fast_pending_byte != 26)
-            {
-                // Something bad happened, force a reset
-                return 'R'; 
-            }
+            fast_bytes_left = uart_recv();
+            fast_block++;
 
             // Start hex generation
             fast_state = 1;
@@ -84,34 +71,54 @@ unsigned int uart_recv2 ( void )
     }
     else if (fast_state == 1)
     {
-        // Return first nibble of current byte
-        ra = (fast_byte_buffer[fast_bytes_done] >> 4) & 0x0f;
+        // Get binary byte and return first nibble
+        fast_byte = uart_recv();
+        ra = (fast_byte >> 4) & 0x0f;
         fast_state = 2;
     }
     else if (fast_state == 2)
     {
         // Return second nibble of current byte
-        ra = fast_byte_buffer[fast_bytes_done] & 0x0f;
+        ra = fast_byte & 0x0f;
 
         // Move to next byte, or switch out of binary mode
-        fast_bytes_done++;
-        if (fast_bytes_done == fast_bytes_recv)
+        fast_bytes_left--;
+        if (fast_bytes_left == 0)
         {
-            if (fast_pending_byte == 26)
-                fast_state = 0;
-            else
-                fast_state = 3;
+            fast_state = 3;
         }
         else
         {
             fast_state = 1;
         }
+        
     }
     else
     {
+        // First byte after binary block
+        ra = uart_recv();
+
+        // If it's a Ctrl+Z, ignore it and get the next byte
+        if (ra == 0x1A)
+        {
+            ra = uart_recv();
+        }
+        else if (ra != 0x0D && ra != 0x0A)
+        {
+            // Something bad happened, report it and abort
+            uart_send('F');
+            uart_send('A');
+            uart_send('I');
+            uart_send('L');
+            hexstrings(fast_block);
+            uart_send(0x0D);
+            uart_send(0x0A);
+            while (1);
+        }
+
         // Return the terminating CR or LF
         fast_state = 0;
-        return fast_pending_byte;
+        return ra;
     }
 
     // Regenerate hex nibble
@@ -134,6 +141,7 @@ int notmain ( void )
     unsigned int ra;
 
     fast_state = 0;
+    fast_block = 0;
 
     uart_init();
 
@@ -181,7 +189,7 @@ restart:
             uart_send(0x0A);
             uart_send(0x0A);
             // Small delay to let the response ack be sent
-        	for (volatile unsigned i = 0; i < 10000; i++);
+        	for (volatile unsigned i = 0; i < 1000000; i++);
 #if AARCH == 32
             BRANCHTO(0x8000);
 #else
@@ -248,7 +256,7 @@ restart:
                     }
                     case 0x01:
                     {
-                        hexstring(sum);
+                        //hexstring(sum);
                         state=0;
                         break;
                     }
