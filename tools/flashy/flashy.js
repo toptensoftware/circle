@@ -88,6 +88,16 @@ async function closeSerialPortAsync()
     {
         stdout.write(`Closing serial port...`)
 
+        // Drain port
+        await new Promise((resolve, reject) => {
+            port.drain((function(err) {
+                if (err)
+                    reject(err);
+                else
+                    resolve();
+            }));
+        });
+
         // Close the port
         await new Promise((resolve, reject) => {
             port.close(function(err) { 
@@ -95,11 +105,12 @@ async function closeSerialPortAsync()
                     reject(err);
                 else
                 {
-                    stdout.write(`ok\n`);
                     resolve();
                 }
             });
         });
+
+        stdout.write(`ok\n`);
     }
 }
 
@@ -164,7 +175,7 @@ async function fast_write(inbyte)
     {
         // Odd number of nibbles.  Oh no!
         if (fast_unsent_nibble >= 0)
-            fail(".hex file not compatible with fast mode- odd number of consecutive hex digits")
+            fail(`.hex file not compatible with fast mode due to an odd number of consecutive hex digits`);
 
         // Back fill the binary length
         if (fast_unsent_byte_count)
