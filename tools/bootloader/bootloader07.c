@@ -27,9 +27,6 @@ extern void hexstrings ( unsigned int );
 extern void timer_init ( void );
 extern unsigned int timer_tick ( void );
 
-extern void timer_init ( void );
-extern unsigned int timer_tick ( void );
-
 int nibble_from_hex(int ascii)
 {
     if (ascii>='0' && ascii<='9')
@@ -56,6 +53,14 @@ void uart_send_str(const char* psz)
     while (*psz)
     {
         uart_send(*psz++);
+    }
+}
+
+void delay_micros(unsigned int period)
+{
+    unsigned int start = timer_tick();
+    while (timer_tick() - start < period)
+    {
     }
 }
 
@@ -94,8 +99,10 @@ int notmain ( void )
     unsigned int segment;
     unsigned int sum;
     unsigned int ra;
+    unsigned int start_delay = 10000;       // 10ms default
 
     uart_init();
+    timer_init();
 
 restart:
     recvstate = recv_state_ready;
@@ -150,7 +157,6 @@ restart:
                     // state.  We can safely ignore it here.
                     continue;
                 }
-
                 // Format error
                 uart_send_str("#ERR:format\r\n");
                 recvstate = recv_state_error;
@@ -179,6 +185,18 @@ restart:
                 break;
 
             case recv_state_eof:
+                if (ra=='s')
+                {
+                    // Set a start delay (n hex digits, in micros)
+                    start_delay = 0;
+                    int nibble;
+                    while ((nibble = nibble_from_hex(uart_recv())) >= 0)
+                    {
+                        start_delay = start_delay << 4 | nibble;
+                    }
+                    continue;
+                }
+
                 // Eof record received, wait for go command
                 if (ra=='g' || ra=='G')
                 {
@@ -190,9 +208,9 @@ restart:
                     uart_send(0x0A);
                     uart_send(0x0A);
 
-                    // Small delay to let the response ack be sent
-                    for (volatile unsigned i = 0; i < 10000; i++)
-                    {}
+                    // Delay before start
+                    if (start_delay)
+                        delay_micros(start_delay);
 
                     // Jump to loaded program
                     #if AARCH == 32

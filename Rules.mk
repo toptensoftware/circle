@@ -222,6 +222,7 @@ flash: $(TARGET).hex
 		--flashBaud:$(FLASHBAUD) \
 		--userBaud:$(USERBAUD) \
 		--reboot:$(REBOOTMAGIC) \
+		$(FLASHYFLAGS) \
 		$(TARGET).hex
 
 endif

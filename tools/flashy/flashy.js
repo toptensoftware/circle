@@ -20,6 +20,7 @@ let rebootMagic = null;
 let rebootDelay = null;
 let monitor = false;
 let noFast = false;
+let goDelay = 0;
 
 // The currently open serial port
 let port;
@@ -423,6 +424,12 @@ async function sendGoCommand()
     // Send it
     stdout.write(`Sending go command...`)
 
+    // Set a start delay
+    if (goDelay)
+    {
+        await writeSerialPortAsync(`s${(goDelay*1000).toString(16).toUpperCase()}\n`);
+    }
+
     // Wait until we receive `--` indicating device received the go command
     if (waitForAck)
     {
@@ -506,8 +513,9 @@ function showHelp()
     console.log(`--nofast           Disable fast mode`);
     console.log(`--nogo             Don't send the go command after flashing`);
     console.log(`--go               Send the go command, even if not flashing`);
+    console.log(`--godelay:<ms>     Sets a delay period for the go command`);
     console.log(`--reboot:<magic>   Sends a magic reboot string at user baud before flashing`);
-    console.log(`--rebootdelay:<ms> Delay after sending reboot magic (only needed with --noack)`);
+    console.log(`--rebootdelay:<ms> Delay after sending reboot magic`);
     console.log(`--monitor          Monitor serial port`);
     console.log(`--help             Show this help`);
 }
@@ -551,6 +559,10 @@ function parseCommandLine()
 
                 case `go`:
                     goSwitch = true;
+                    break;
+
+                case `godelay`:
+                    goDelay = Number(value);
                     break;
 
                 case `reboot`:
