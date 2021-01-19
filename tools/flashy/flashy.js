@@ -26,7 +26,10 @@ let port;
 
 // The serial port module (delayed load)
 let SerialPort;
+
+// Resolved runtime settings
 let fastMode = false;
+let willSendGoCommand;
 
 // Open the serial port at specified baud rate, closing and reopening
 // if currently open at a different rate
@@ -81,6 +84,19 @@ async function openSerialPortAsync(baudRate)
     stdout.write(`ok\n`);
 }
 
+async function drainSerialPortAsync()
+{
+    // Drain port
+    await new Promise((resolve, reject) => {
+        port.drain((function(err) {
+            if (err)
+                reject(err);
+            else
+                resolve();
+        }));
+    });
+}
+
 // Close the serial port (if it's open)
 async function closeSerialPortAsync()
 {
@@ -88,15 +104,8 @@ async function closeSerialPortAsync()
     {
         stdout.write(`Closing serial port...`)
 
-        // Drain port
-        await new Promise((resolve, reject) => {
-            port.drain((function(err) {
-                if (err)
-                    reject(err);
-                else
-                    resolve();
-            }));
-        });
+        // Drain
+        await drainSerialPortAsync();
 
         // Close the port
         await new Promise((resolve, reject) => {
@@ -129,109 +138,129 @@ async function writeSerialPortAsync(data)
     });
 };
 
-
-// The fast flash write works by switching to binary mode for seqeuences
-// of hex digit pairs that appear immediately after a ':' (99.9% typical case)
-// The send format is to instead an '=' to indicate binary line, followed
-// by a length byte, followed by the binary data
-// 
-// eg: ":0011223344" becomes '=' 0x05 0x00 0x11 0x22 0x33 0x44
-
-let fast_write_buffer = Buffer.alloc(4096);
-let fast_write_buffer_used = 0;
-let fast_unsent_nibble = -1;
-let fast_unsent_byte_count = 0;
-
-// Flush the fast flash buffer
-async function flush_fast_write()
+function bootloaderErrorWatcher(data)
 {
-    if (fast_write_buffer_used)
+    let str = data.toString(`utf8`);
+
+    let err = (/#ERR:(.*)\r/gm).exec(str);
+    if (err)
     {
-        await writeSerialPortAsync(fast_write_buffer.subarray(0, fast_write_buffer_used));
-        fast_write_buffer_used = 0;
+        console.error(`\n\nAn error occurred during the transfer: ${err[1]}`);
+        process.exit(9);
     }
 }
 
-// Write a byte to the fast flash buffer
-async function fast_write(inbyte)
+function watchForBootloaderErrors(enable)
 {
-    // Convert the incoming character to a hex nibble
-    let nibble = -1;
-    if (inbyte >= 0x30 && inbyte <= 0x39)
-        nibble = inbyte - 0x30;
-    else if (inbyte >= 0x41 && inbyte <= 0x46)
-        nibble = inbyte - 0x41 + 0xA;
-    else if (inbyte >= 0x61 && inbyte <= 0x66)
-        nibble = inbyte - 0x61 + 0xA;
-
-    // Can only switch to binary if we can replace the ':' with '='.  Check we just wrote that...
-    if (fast_unsent_byte_count == 0 && (fast_write_buffer_used == 0 || fast_write_buffer[fast_write_buffer_used-1] != 0x3A))
+    // Redundant?
+    if (port.listenerEnabled == enable)
+        return;
+    port.listenerEnabled = enable;
+    
+    // Install/remove listener
+    if (enable)
     {
-        nibble = -1;
+        port.on('data', bootloaderErrorWatcher);
+    }
+    else
+    {
+        port.removeListener('data', bootloaderErrorWatcher);
+    }
+}
+
+
+
+// Receives IHEX formatted ascii text and converts to binary
+// stream as understood by the bootloader.
+function binary_encoder()
+{
+    let state = 0;
+    let buffer = Buffer.alloc(4096);
+    let buffer_used = 0;
+    let unsent_nibble = -1;
+    let record_bytes_left = -1;
+
+    // Flush the fast flash buffer
+    async function flush()
+    {
+        if (buffer_used)
+        {
+            await writeSerialPortAsync(buffer.subarray(0, buffer_used));
+            buffer_used = 0;
+        }
     }
 
-    // If it wasn't a hex digit, then revert to text mode
-    if (nibble == -1)
+    // Write a byte
+    async function write(inbyte)
     {
-        // Odd number of nibbles.  Oh no!
-        if (fast_unsent_nibble >= 0)
-            fail(`.hex file not compatible with fast mode due to an odd number of consecutive hex digits`);
-
-        // Back fill the binary length
-        if (fast_unsent_byte_count)
+        if (state == 0)
         {
-            fast_write_buffer[fast_write_buffer_used - fast_unsent_byte_count - 1] = fast_unsent_byte_count;
-            fast_unsent_byte_count = 0;
-
-            // Binary data must be terminated with a CR, LF of Ctrl+Z.  Insert a Ctrl+Z if necessary
-            // (Not the typical case)
-            if (inbyte != 0x0D && inbyte != 0x0A)
+            if (inbyte == 0x3a)     // ":"
             {
-                fast_write_buffer[fast_write_buffer_used++] = inbyte;
+                // Flush buffer?
+                if (buffer_used > 2048)
+                    await flush();
+
+                // start of new record
+                buffer[buffer_used++] = 0x3d;     // "="
+                fast_record_length = -1;
+                state = 1;
+                record_bytes_left = -1;
+                return;
             }
-
+            else
+            {
+                // Must be white space
+                if (inbyte != 0x20 && inbyte != 0x0A && inbyte != 0x0D)
+                {
+                    fail("Invalid .hex file, unexpected character outside record");
+                }
+                return;
+            }
         }
 
-        // Write non-hex bytes
-        fast_write_buffer[fast_write_buffer_used++] = inbyte;
+        // Convert the incoming character to a hex nibble
+        let nibble;
+        if (inbyte >= 0x30 && inbyte <= 0x39)
+            nibble = inbyte - 0x30;
+        else if (inbyte >= 0x41 && inbyte <= 0x46)
+            nibble = inbyte - 0x41 + 0xA;
+        else if (inbyte >= 0x61 && inbyte <= 0x66)
+            nibble = inbyte - 0x61 + 0xA;
+        else
+            fail("Invalid .hex file, expected hex digit");
 
-        // Flush the buffer if it's getting fullish
-        if (fast_write_buffer_used > 2048)
+        if (state == 1)
         {
-            await flush_fast_write();
+            // First hex nibble, store it
+            state = 2;
+            unsent_nibble = nibble;
+            return;
         }
-        return;
+
+        if (state == 2)
+        {
+            // Second hex nibble, calculate full byte
+            let byte = ((unsent_nibble << 4) | nibble);
+
+            // Write it
+            buffer[buffer_used++] = byte;
+
+            // Initialize the record length
+            if (record_bytes_left == -1)
+                record_bytes_left = byte + 5;  
+
+            // Update record length and check for end of record
+            record_bytes_left--;
+            if (record_bytes_left == 0)
+                state = 0;
+            else
+                state = 1;
+        }
     }
 
-    // If this is the first nibble, store it until we get the second.
-    if (fast_unsent_nibble == -1)
-    {
-        // Just store it for now
-        fast_unsent_nibble = nibble;
-        return;
-    }
-
-    // If this is the first complete byte in the sequence, then change the ":"
-    // to "=" and reserve room to back fill the length later.
-    if (fast_unsent_byte_count == 0)
-    {
-        // Switch to "=""            
-        fast_write_buffer[fast_write_buffer_used-1] = 0x3D;
-
-        // Reserve room
-        fast_write_buffer_used++;
-    }
-
-    // Append the binary byte to the buffer
-     fast_write_buffer[fast_write_buffer_used++] = ((fast_unsent_nibble << 4) | nibble);
-    fast_unsent_nibble = -1;
-    fast_unsent_byte_count++;
-
-    // Check
-    if (fast_unsent_byte_count > 255)
-        fail(".hex file is incompatible with fast mode, use --nofast switch");
+    return { flush, write };
 }
-
 
 // Send the reboot magic string
 async function sendRebootMagic()
@@ -259,7 +288,14 @@ async function flashDevice()
     // Open serial port
     await openSerialPortAsync(flashBaud);
 
-    let resetBuf = Buffer.alloc(257);
+    // Reset signal consists of 256 x 0x80 chars, followed
+    // by a reset 'R' command.  The idea here is the 0x80s will
+    // flush a previously canceled flash out of a binary
+    // record state.  0x80 is used in case the bootloader is
+    // cancelled at the start of a binary record and we don't 
+    // want to write a lo-memory address that will trash the
+    // bootloader itself.
+    let resetBuf = Buffer.alloc(257, 0x80);
     resetBuf[256] = 'R'.charCodeAt(0);
 
     // Wait for `IHEX` from device as ack it's ready
@@ -308,12 +344,18 @@ async function flashDevice()
             resolveDeviceReady = resolve;
         });
         port.removeAllListeners('data');
+
+        // Now that we know the device is in a good state, watch for errors
+        watchForBootloaderErrors(true);
     }
     else
     {
         // Send reset command
         await writeSerialPortAsync(resetBuf);
     }
+
+    // Create fast write binary encoder
+    let binenc = fastMode ? binary_encoder() : null;
 
     // Copy to device
     let startTime = new Date().getTime();
@@ -329,11 +371,10 @@ async function flashDevice()
 
         if (fastMode)
         {
-            // In fast mode, push each byte through the fast
-            // flash state machine
+            // In fast mode, push each byte through the binary encoder
             for (let i=0; i<bytesRead; i++)
             {
-                await fast_write(buf[i]);
+                await binenc.write(buf[i]);
             }
         }
         else
@@ -348,13 +389,26 @@ async function flashDevice()
     // Flush the fast flash buffer
     if (fastMode)
     {
-        flush_fast_write();
+        binenc.flush();
+    }
+
+    // Wait for any pending errors
+    // (If we're about to send the go command, it will pick up errors
+    // before it's acked so don't need to wait here)
+    if (waitForAck && !willSendGoCommand)
+    {
+        // Wait for everything to be sent
+        await drainSerialPortAsync();
+
+        // Small delay in case there's a pending error coming from the bootloader
+        await delay(10);
+        port.removeAllListeners('data');
     }
 
     // Done
     stdout.write(`ok\n`);
 
-    // Log time
+    // Log time taken
     let elapsedTime = new Date().getTime() - startTime;
     stdout.write(`Finished in ${((elapsedTime / 1000).toFixed(1))} seconds.\n`);
 }
@@ -377,7 +431,7 @@ async function sendGoCommand()
         port.on('data', function(data) {
 
             let str = data.toString(`utf8`);
-            stdout.write(str);
+            //stdout.write(str);
             if (str.includes(`\r--\r\n\n`))
             {
                 stdout.write(`ok\n`);
@@ -385,6 +439,9 @@ async function sendGoCommand()
             }
 
         });
+
+        // Enable error watch
+        watchForBootloaderErrors(true);
 
         // Send command
         await writeSerialPortAsync('g');
@@ -408,8 +465,14 @@ async function startMonitor()
     // Open serial port
     await openSerialPortAsync(userBaud);
 
+    // Bootloader shouldn't be running so remove error watcher
+    watchForBootloaderErrors(false);
+
+    stdout.write("Monitoring....\n");
+
     // Setup receive listener
     let resolveDeviceReady;
+    port.removeAllListeners('data');
     port.on('data', function(data) {
 
         var str = data.toString(`utf8`);
@@ -556,6 +619,8 @@ function parseCommandLine()
     // parse the command line
     parseCommandLine();
 
+    willSendGoCommand = (hexFile && !nogoSwitch) || (!hexFile && goSwitch);
+
     // Reboot
     if (rebootMagic)
         await sendRebootMagic();
@@ -565,7 +630,7 @@ function parseCommandLine()
         await flashDevice();
 
     // Go
-    if ((hexFile && !nogoSwitch) || (!hexFile && goSwitch))
+    if (willSendGoCommand)
         await sendGoCommand();
 
     // Monitor
