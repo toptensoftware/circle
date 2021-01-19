@@ -176,7 +176,7 @@ function watchForBootloaderErrors(enable)
 function binary_encoder()
 {
     let state = 0;
-    let buffer = Buffer.alloc(4096);
+    let buffer = Buffer.alloc(65536);
     let buffer_used = 0;
     let unsent_nibble = -1;
     let record_bytes_left = -1;
@@ -199,7 +199,7 @@ function binary_encoder()
             if (inbyte == 0x3a)     // ":"
             {
                 // Flush buffer?
-                if (buffer_used > 2048)
+                if (buffer_used > buffer.length - 1024)
                     await flush();
 
                 // start of new record
