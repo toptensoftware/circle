@@ -45,6 +45,10 @@ public:
 	void Format (const char *pFormat, ...);		// supports only a small subset of printf(3)
 	void FormatV (const char *pFormat, va_list Args);
 
+	char* Detach();
+	void Attach(char* pString);
+
+
 private:
 	void PutChar (char chChar, size_t nCount = 1);
 	void PutString (const char *pString);

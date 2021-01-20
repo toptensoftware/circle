@@ -725,3 +725,18 @@ char *CString::ftoa (char *pDest, double fNumber, unsigned nPrecision)
 	
 	return pDest;
 }
+
+char* CString::Detach()
+{
+	char* temp = m_pBuffer;
+	m_pBuffer = 0;
+	m_nSize = 0;
+	return temp;
+}
+
+void CString::Attach(char* pString)
+{
+	delete [] m_pBuffer;
+	m_nSize = strlen (pString)+1;
+	m_pBuffer = pString;
+}
