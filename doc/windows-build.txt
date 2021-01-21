@@ -95,15 +95,15 @@ For build instructions, please refer to the circle documentation for building un
 Using WSL 2
 -----------
 
-The main disadvantage of using WSL 1 is slow performace.  WSL 2 can run more that twice as fast
-which can save a lot of time in building C++ projects. Unfortunately WSL 2 doesn't support serial 
+The main disadvantage of using WSL 1 is often painfully slow performance.  WSL 2 solves this and 
+can generally build C++ projects more that twice as fast. Unfortunately WSL 2 doesn't support serial 
 devices which makes flashing and monitoring difficult.
 
 If you only need to flash the device and monitor its output there's a fairly simple work around - 
 use Windows to run the new [bootloader flash tool](bootloader.txt).
 
 (This approach doesn't work with the Python tool - for some reason Python fails to start from
-inside the WSL machine).
+inside a WSL machine).
 
 Under WSL, a Windows program can be launched from within the WSL machine and the WSL files accessed
 via a UNC path name.  This functionality can be leveraged so that builds are done under WSL but 
