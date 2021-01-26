@@ -637,6 +637,7 @@ void CStringBuilder::Attach(char* pString)
 	m_pBuffer = pString;
 }
 
+extern "C" 
 __attribute__ ((weak))
 int string_replace(char** pVal, const char* psz, const char* pOld, const char* pNew)
 {
@@ -647,6 +648,7 @@ int string_replace(char** pVal, const char* psz, const char* pOld, const char* p
 }
 
 
+extern "C" 
 __attribute__ ((weak))
 char* string_vsprintf(const char *pFormat, va_list Args) 
 {

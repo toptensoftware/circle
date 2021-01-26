@@ -53,7 +53,7 @@ private:
 	char	 *m_pInPtr;
 };
 
-int string_replace(char** pVal, const char* psz, const char* pOld, const char* pNew);
-char* string_vsprintf(const char *pFormat, va_list Args);
+extern "C" int string_replace(char** pVal, const char* psz, const char* pOld, const char* pNew);
+extern "C" char* string_vsprintf(const char *pFormat, va_list Args);
 
 #endif
