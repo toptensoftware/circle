@@ -17,38 +17,43 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
-#ifndef _circle_string_h
-#define _circle_string_h
+#ifndef _circle_stringbuilder_h
+#define _circle_stringbuilder_h
 
 #include <circle/stdarg.h>
 #include <circle/types.h>
 
-class CString
+class CStringBuilder
 {
 public:
-	CString (void);
-	CString (const char *pString);
-	virtual ~CString (void);
+	CStringBuilder (void);
+	virtual ~CStringBuilder (void);
 
-	operator const char *(void) const;
-	const char *operator = (const char *pString);
-	const CString &operator = (const CString &rString);
+	int Replace (const char* psz, const char *pOld, const char *pNew); // returns number of occurrences
 
-	size_t GetLength (void) const;
-
-	void Append (const char *pString);
-	int Compare (const char *pString) const;
-	int Find (char chChar) const;			// returns index or -1 if not found
-
-	int Replace (const char *pOld, const char *pNew); // returns number of occurrences
-	
-	void Format (const char *pFormat, ...) 		// supports only a small subset of printf(3)
-		__attribute__ ((format (printf, 2, 3)));
+    void Format (const char *pFormat, ...);
 	void FormatV (const char *pFormat, va_list Args);
+
+	void PutChar (char chChar, size_t nCount = 1);
+	void PutString (const char *pString);
+	void ReserveSpace (size_t nSpace);
+
+    char* Detach();
+    void Attach(char* pString);
+
+	static char *ntoa (char *pDest, unsigned long ulNumber, unsigned nBase, boolean bUpcase);
+#if STDLIB_SUPPORT >= 1
+	static char *lltoa (char *pDest, unsigned long long ullNumber, unsigned nBase, boolean bUpcase);
+#endif
+	static char *ftoa (char *pDest, double fNumber, unsigned nPrecision);
 
 private:
 	char 	 *m_pBuffer;
 	unsigned  m_nSize;
+	char	 *m_pInPtr;
 };
+
+int string_replace(char** pVal, const char* psz, const char* pOld, const char* pNew);
+char* string_vsprintf(const char *pFormat, va_list Args);
 
 #endif
