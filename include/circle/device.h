@@ -41,6 +41,9 @@ public:
 	// returns the resulting offset, (u64) -1 on error
 	virtual u64 Seek (u64 ullOffset);		// byte offset
 
+	// I/O Control
+	virtual int IOCtl (unsigned long cmd, void* data) { return -1; }; 
+
 	// returns TRUE on successful removal
 	virtual boolean RemoveDevice (void);
 
