@@ -41,14 +41,31 @@ public:
 	int Find (char chChar) const;			// returns index or -1 if not found
 
 	int Replace (const char *pOld, const char *pNew); // returns number of occurrences
+
 	
 	void Format (const char *pFormat, ...) 		// supports only a small subset of printf(3)
 		__attribute__ ((format (printf, 2, 3)));
 	void FormatV (const char *pFormat, va_list Args);
 
+	char* Detach();
+	void Attach(char* pString);
+
+
+private:
+	void PutChar (char chChar, size_t nCount = 1);
+	void PutString (const char *pString);
+	void ReserveSpace (size_t nSpace);
+
+	static void vcbprintf_callback(void* arg, char ch)
+	{
+		CString* pString = (CString*)arg;
+		pString->PutChar(ch);
+	}
+
 private:
 	char 	 *m_pBuffer;
 	unsigned  m_nSize;
+	char	 *m_pInPtr;
 };
 
 #endif

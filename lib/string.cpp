@@ -21,8 +21,8 @@
 //
 #include <circle/string.h>
 #include <circle/util.h>
-#include <circle/stringbuilder.h>
-#include <malloc.h>
+
+#define FORMAT_RESERVE		64	// additional bytes to allocate
 
 CString::CString (void)
 :	m_pBuffer (0),
@@ -34,14 +34,14 @@ CString::CString (const char *pString)
 {
 	m_nSize = strlen (pString)+1;
 
-	m_pBuffer = (char*)malloc(m_nSize);
+	m_pBuffer = new char[m_nSize];
 
 	strcpy (m_pBuffer, pString);
 }
 
 CString::~CString (void)
 {
-	free(m_pBuffer);
+	delete [] m_pBuffer;
 	m_pBuffer = 0;
 }
 
@@ -57,11 +57,11 @@ CString::operator const char *(void) const
 
 const char *CString::operator = (const char *pString)
 {
-	free(m_pBuffer);
+	delete [] m_pBuffer;
 
 	m_nSize = strlen (pString)+1;
 
-	m_pBuffer = (char*)malloc(m_nSize);
+	m_pBuffer = new char[m_nSize];
 
 	strcpy (m_pBuffer, pString);
 
@@ -70,11 +70,11 @@ const char *CString::operator = (const char *pString)
 
 const CString &CString::operator = (const CString &rString)
 {
-	free(m_pBuffer);
+	delete [] m_pBuffer;
 
 	m_nSize = strlen (rString)+1;
 
-	m_pBuffer = (char*)malloc(m_nSize);
+	m_pBuffer = new char[m_nSize];
 
 	strcpy (m_pBuffer, rString);
 
@@ -100,12 +100,12 @@ void CString::Append (const char *pString)
 	}
 	m_nSize += strlen (pString);
 
-	char *pBuffer = (char*)malloc(m_nSize);
+	char *pBuffer = new char[m_nSize];
 
 	if (m_pBuffer != 0)
 	{
 		strcpy (pBuffer, m_pBuffer);
-		free(m_pBuffer);
+		delete [] m_pBuffer;
 	}
 	else
 	{
@@ -142,16 +142,53 @@ int CString::Find (char chChar) const
 int CString::Replace (const char *pOld, const char *pNew)
 {
 	int nResult = 0;
+
 	if (*pOld == '\0')
 	{
 		return nResult;
 	}
 
-	char* pFinal;
-	nResult = string_replace(&pFinal, m_pBuffer, pOld, pNew);
+	CString OldString (m_pBuffer);
 
-	free(m_pBuffer);
-	m_pBuffer = pFinal;
+	delete [] m_pBuffer;
+	m_nSize = FORMAT_RESERVE;
+	m_pBuffer = new char[m_nSize];
+	m_pInPtr = m_pBuffer;
+
+	const char *pReader = OldString.m_pBuffer;
+	const char *pFound;
+	while ((pFound = strchr (pReader, pOld[0])) != 0)
+	{
+		while (pReader < pFound)
+		{
+			PutChar (*pReader++);
+		}
+
+		const char *pPattern = pOld+1;
+		const char *pCompare = pFound+1;
+		while (   *pPattern != '\0'
+		       && *pCompare == *pPattern)
+		{
+			pCompare++;
+			pPattern++;
+		}
+
+		if (*pPattern == '\0')
+		{
+			PutString (pNew);
+			pReader = pCompare;
+			nResult++;
+		}
+		else
+		{
+			PutChar (*pReader++);
+		}
+	}
+
+	PutString (pReader);
+
+	*m_pInPtr = '\0';
+
 	return nResult;
 }
 
@@ -159,13 +196,90 @@ void CString::Format (const char *pFormat, ...)
 {
 	va_list var;
 	va_start (var, pFormat);
+
 	FormatV (pFormat, var);
+
 	va_end (var);
 }
 
+
+extern "C"
+void vcbprintf(void (*write)(void*, char), void* arg, const char* format, va_list args);
+
 void CString::FormatV (const char *pFormat, va_list Args)
 {
-	free(m_pBuffer);
-	m_pBuffer = string_vsprintf(pFormat, Args);
+	delete [] m_pBuffer;
+
+	m_nSize = FORMAT_RESERVE;
+	m_pBuffer = new char[m_nSize];
+	m_pInPtr = m_pBuffer;
+
+	vcbprintf(vcbprintf_callback, this, pFormat, Args);
+
+	*m_pInPtr = '\0';
 }
 
+void CString::PutChar (char chChar, size_t nCount)
+{
+	ReserveSpace (nCount);
+
+	while (nCount--)
+	{
+		*m_pInPtr++ = chChar;
+	}
+}
+
+void CString::PutString (const char *pString)
+{
+	size_t nLen = strlen (pString);
+	
+	ReserveSpace (nLen);
+	
+	strcpy (m_pInPtr, pString);
+	
+	m_pInPtr += nLen;
+}
+
+void CString::ReserveSpace (size_t nSpace)
+{
+	if (nSpace == 0)
+	{
+		return;
+	}
+	
+	size_t nOffset = m_pInPtr - m_pBuffer;
+	size_t nNewSize = nOffset + nSpace + 1;
+	if (m_nSize >= nNewSize)
+	{
+		return;
+	}
+	
+	nNewSize += FORMAT_RESERVE;
+	char *pNewBuffer = new char[nNewSize];
+		
+	*m_pInPtr = '\0';
+	strcpy (pNewBuffer, m_pBuffer);
+	
+	delete [] m_pBuffer;
+
+	m_pBuffer = pNewBuffer;
+	m_nSize = nNewSize;
+
+	m_pInPtr = m_pBuffer + nOffset;
+}
+
+
+char* CString::Detach()
+{
+	char* temp = m_pBuffer;
+	m_pBuffer = 0;
+	m_nSize = 0;
+	return temp;
+}
+
+void CString::Attach(char* pString)
+{
+	delete [] m_pBuffer;
+	m_nSize = strlen (pString)+1;
+	m_pBuffer = pString;
+}
