@@ -26,6 +26,13 @@
 
 typedef void TSchedulerTaskHandler (CTask *pTask);
 
+struct TSchedulerTaskHandlerInfo
+{
+	TSchedulerTaskHandlerInfo	*pNext;
+	TSchedulerTaskHandler		*pHandler;
+};
+
+
 class CScheduler				// simple cooperative (non-preemtive) scheduler
 {
 public:
@@ -75,6 +82,7 @@ private:
 
 	TSchedulerTaskHandler *m_pTaskSwitchHandler;
 	TSchedulerTaskHandler *m_pTaskTerminationHandler;
+	TSchedulerTaskHandlerInfo* m_pTaskTerminationHandlerList;
 
 	int m_iSuspendNewTasks;
 

@@ -31,7 +31,7 @@ CScheduler::CScheduler (void)
 	m_pCurrent (0),
 	m_nCurrent (0),
 	m_pTaskSwitchHandler (0),
-	m_pTaskTerminationHandler (0),
+	m_pTaskTerminationHandlerList (0),
 	m_iSuspendNewTasks (0)
 {
 	assert (s_pThis == 0);
@@ -44,7 +44,7 @@ CScheduler::CScheduler (void)
 CScheduler::~CScheduler (void)
 {
 	m_pTaskSwitchHandler = 0;
-	m_pTaskTerminationHandler = 0;
+	m_pTaskTerminationHandlerList = 0;
 
 	s_pThis = 0;
 }
@@ -143,9 +143,10 @@ void CScheduler::RegisterTaskSwitchHandler (TSchedulerTaskHandler *pHandler)
 
 void CScheduler::RegisterTaskTerminationHandler (TSchedulerTaskHandler *pHandler)
 {
-	assert (m_pTaskTerminationHandler == 0);
-	m_pTaskTerminationHandler = pHandler;
-	assert (m_pTaskTerminationHandler != 0);
+	TSchedulerTaskHandlerInfo* pInfo = new TSchedulerTaskHandlerInfo;
+	pInfo->pNext = m_pTaskTerminationHandlerList;
+	pInfo->pHandler = pHandler;
+	m_pTaskTerminationHandlerList = pInfo;
 }
 
 // Causes all new tasks to be created in a suspended state
@@ -354,13 +355,17 @@ unsigned CScheduler::GetNextTask (void)
 			return nTask;
 
 		case TaskStateTerminated:
-			if (m_pTaskTerminationHandler != 0)
+		{
+			TSchedulerTaskHandlerInfo* pInfo = m_pTaskTerminationHandlerList;
+			while (pInfo)
 			{
-				(*m_pTaskTerminationHandler) (pTask);
+				(pInfo->pHandler) (pTask);
+				pInfo = pInfo->pNext;
 			}
 			RemoveTask (pTask);
 			delete pTask;
 			return MAX_TASKS;
+		}
 
 		default:
 			assert (0);
