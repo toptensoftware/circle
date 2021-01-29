@@ -163,8 +163,7 @@ void CLogger::WriteV (const char *pSource, TLogSeverity Severity, const char *pM
 #ifndef USE_RPI_STUB_AT
 		set_qemu_exit_status (EXIT_STATUS_PANIC);
 #ifndef ARM_ALLOW_MULTI_CORE
-		//halt ();
-		while (1);
+		halt ();
 #else
 		CMultiCoreSupport::HaltAll ();
 #endif
