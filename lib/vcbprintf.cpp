@@ -24,7 +24,7 @@
 #include <circle/util.h>
 #include <stdarg.h>
 
-#ifndef NOVCBPRINTF
+#ifndef __ccw__
 
 #if AARCH == 32
 	#define MAX_NUMBER_LEN		22	// 64 bit octal number
@@ -514,4 +514,4 @@ void vcbprintf(void (*write)(void*, char), void* arg, const char* pFormat, va_li
 	}
 }
 
-#endif
+#endif		// __ccw__

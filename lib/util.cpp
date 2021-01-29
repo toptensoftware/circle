@@ -19,6 +19,7 @@
 //
 #include <circle/util.h>
 
+#ifndef __ccw__
 #if STDLIB_SUPPORT <= 1
 
 void *memmove (void *pDest, const void *pSrc, size_t nLength)
@@ -689,3 +690,4 @@ u32 bswap32 (u32 ulValue)
 }
 
 #endif
+#endif	// __ccw__
