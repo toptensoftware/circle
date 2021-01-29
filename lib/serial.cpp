@@ -349,20 +349,18 @@ int CSerialDevice::Write (const void *pBuffer, size_t nCount)
 
 	while (nCount--)
 	{
-		while (!Write (*pChar))
+		if (!Write (*pChar))
 		{
-			m_LineSpinLock.Release ();
-			m_LineSpinLock.Acquire ();
+			break;
 		}
 
 		if (*pChar++ == '\n')
 		{
 			if (m_nOptions & SERIAL_OPTION_ONLCR)
 			{
-				while (!Write ('\r'))
+				if (!Write ('\r'))
 				{
-					m_LineSpinLock.Release ();
-					m_LineSpinLock.Acquire ();
+					break;
 				}
 			}
 		}
