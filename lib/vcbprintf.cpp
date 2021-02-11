@@ -190,7 +190,7 @@ void write_chrs(void (*write)(void*, char), void* arg, char ch, size_t count)
 
 extern "C"
 __attribute__ ((weak))
-void vcbprintf(void (*write)(void*, char), void* arg, const char* pFormat, va_list Args)
+void _vcbprintf(void (*write)(void*, char), void* arg, const char* pFormat, va_list Args)
 {
 	while (*pFormat != '\0')
 	{

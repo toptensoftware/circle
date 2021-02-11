@@ -204,7 +204,7 @@ void CString::Format (const char *pFormat, ...)
 
 
 extern "C"
-void vcbprintf(void (*write)(void*, char), void* arg, const char* format, va_list args);
+void _vcbprintf(void (*write)(void*, char), void* arg, const char* format, va_list args);
 
 void CString::FormatV (const char *pFormat, va_list Args)
 {
@@ -214,7 +214,7 @@ void CString::FormatV (const char *pFormat, va_list Args)
 	m_pBuffer = new char[m_nSize];
 	m_pInPtr = m_pBuffer;
 
-	vcbprintf(vcbprintf_callback, this, pFormat, Args);
+	_vcbprintf(vcbprintf_callback, this, pFormat, Args);
 
 	*m_pInPtr = '\0';
 }
